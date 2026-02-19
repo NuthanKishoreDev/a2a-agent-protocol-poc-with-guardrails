@@ -1,39 +1,54 @@
 {
-  "name": "hello_world_agent",
-  "description": "Agent that can roll dice, check prime numbers, and get current weather.",
-  "version": "0.0.1",
-  "url": "https://remote-a2a-agent-495485641332.us-central1.run.app:443",
-  "protocolVersion": "0.3.0",
-  "preferredTransport": "JSONRPC",
-  "defaultInputModes": ["text/plain"],
-  "defaultOutputModes": ["text/plain"],
-  "capabilities": {},
-  "supportsAuthenticatedExtendedCard": false,
-  "skills": [
-    {
-      "id": "hello_world_agent",
-      "name": "model",
-      "tags": ["llm"],
-      "description": "Agent that can roll dice, check prime numbers, and get current weather. \n    I can roll dice, check prime numbers, and get the current weather for any city.\n\n    When I am asked to roll a die, call the roll_die tool with the number of sides (integer).\n    When checking prime numbers, call the check_prime tool with a list of integers.\n    When asked about weather, call the get_weather tool with the city name (string).\n\n    When asked to roll a die AND check primes:\n      1. Call roll_die first. Wait for the result.\n      2. Call check_prime with that result.\n      3. Always include the roll result in my response.\n    ",
-      "examples": []
-    },
-    {
-      "id": "hello_world_agent-roll_die",
-      "name": "roll_die",
-      "tags": ["llm", "tools"],
-      "description": "Roll a die and return the rolled result.\n\nArgs:\n    sides: The integer number of sides the die has.\n    tool_context: The tool context (managed by ADK).\n\nReturns:\n    An integer result of rolling the die."
-    },
-    {
-      "id": "hello_world_agent-check_prime",
-      "name": "check_prime",
-      "tags": ["llm", "tools"],
-      "description": "Check if a given list of numbers are prime.\n\nArgs:\n    nums: The list of numbers to check.\n\nReturns:\n    A string indicating which numbers are prime."
-    },
-    {
-      "id": "hello_world_agent-get_weather",
-      "name": "get_weather",
-      "tags": ["llm", "tools"],
-      "description": "Get the current weather for a city using the free Open-Meteo API (no API key required).\n\nArgs:\n    city: The name of the city to get weather for (e.g. 'London', 'Bangalore').\n\nReturns:\n    A string describing the current weather conditions."
-    }
-  ]
+    "name": "hello_world_agent",
+    "description": "Agent that can roll dice, check prime numbers, and get current weather.",
+    "version": "0.0.1",
+    "url": "https://remote-a2a-agent-v4-495485641332.us-central1.run.app:443",
+    "protocolVersion": "0.3.0",
+    "preferredTransport": "JSONRPC",
+    "defaultInputModes": [
+        "text/plain"
+    ],
+    "defaultOutputModes": [
+        "text/plain"
+    ],
+    "capabilities": {},
+    "supportsAuthenticatedExtendedCard": false,
+    "skills": [
+        {
+            "id": "hello_world_agent",
+            "name": "model",
+            "tags": [
+                "llm"
+            ],
+            "description": "Agent that can roll dice, check prime numbers, and get current weather. \n    I can roll dice, check prime numbers, and get the current weather for any city.\n\n    When I am asked to roll a die, call the roll_die tool with the number of sides (integer).\n    When checking prime numbers, call the check_prime tool with a list of integers.\n    When asked about weather, call the get_weather tool with the city name (string).\n\n    When asked to roll a die AND check primes:\n      1. Call roll_die first. Wait for the result.\n      2. Call check_prime with that result.\n      3. Always include the roll result in my response.\n    ",
+            "examples": []
+        },
+        {
+            "id": "hello_world_agent-roll_die",
+            "name": "roll_die",
+            "tags": [
+                "llm",
+                "tools"
+            ],
+            "description": "Roll a die and return the rolled result.\n\nArgs:\n    sides: The integer number of sides the die has.\n    tool_context: The tool context (managed by ADK).\n\nReturns:\n    An integer result of rolling the die."
+        },
+        {
+            "id": "hello_world_agent-check_prime",
+            "name": "check_prime",
+            "tags": [
+                "llm",
+                "tools"
+            ],
+            "description": "Check if a given list of numbers are prime.\n\nArgs:\n    nums: The list of numbers to check.\n\nReturns:\n    A string indicating which numbers are prime."
+        },
+        {
+            "id": "hello_world_agent-get_weather",
+            "name": "get_weather",
+            "tags": [
+                "llm",
+                "tools"
+            ],
+            "description": "Get the current weather for a city using the free Open-Meteo API (no API key required).\n\nArgs:\n    city: The name of the city to get weather for (e.g. 'London', 'Bangalore').\n\nReturns:\n    A string describing the current weather conditions."
+        }
+    ]
 }

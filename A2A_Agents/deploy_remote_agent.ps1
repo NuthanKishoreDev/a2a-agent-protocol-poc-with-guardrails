@@ -4,7 +4,7 @@
 
 param(
     [string]$project = "kpmgpoc",
-    [string]$service = "remote-a2a-agent",
+    [string]$service = "remote-a2a-agent-v4",
     [string]$region = "us-central1"
 )
 
@@ -22,7 +22,9 @@ if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
 # 2. Build and Submit Container Image to ARTIFACT REGISTRY
 $repoName = "a2a-containers"
 $arLocation = $region
-$image = "$arLocation-docker.pkg.dev/$project/$repoName/$service"
+$version = "v4.0"
+$imageBase = "$arLocation-docker.pkg.dev/$project/$repoName/$service"
+$image = "${imageBase}:${version}"   # versioned tag
 
 Write-Host "[*] Ensuring Artifact Registry repo '$repoName' exists..."
 gcloud artifacts repositories describe $repoName --location=$arLocation --project=$project >$null 2>&1
@@ -58,13 +60,12 @@ gcloud services enable secretmanager.googleapis.com --project $project 2>&1 | Ou
 # Get API Key from .env
 $envFile = "remote_agent\.env"
 $apiKey = "dev-key"
+$oauthClientId = "kpmg-gemini-client"  # default
 if (Test-Path $envFile) {
     $content = Get-Content $envFile
     foreach ($line in $content) {
-        if ($line -match "^REMOTE_AGENT_API_KEY=(.*)") {
-            $apiKey = $matches[1]
-            break
-        }
+        if ($line -match "^REMOTE_AGENT_API_KEY=(.*)") { $apiKey = $matches[1] }
+        if ($line -match "^OAUTH_CLIENT_ID=(.*)") { $oauthClientId = $matches[1] }
     }
 }
 
@@ -112,7 +113,8 @@ $deployOutput = gcloud run deploy $service `
     --region $region `
     --allow-unauthenticated `
     --project $project `
-    --set-env-vars "GOOGLE_CLOUD_PROJECT=$project,GOOGLE_CLOUD_LOCATION=$region,GOOGLE_GENAI_USE_VERTEXAI=true" `
+    --revision-suffix "$($version -replace '\.', '-')" `
+    --set-env-vars "GOOGLE_CLOUD_PROJECT=$project,GOOGLE_CLOUD_LOCATION=$region,GOOGLE_GENAI_USE_VERTEXAI=true,OAUTH_CLIENT_ID=$oauthClientId" `
     --set-secrets "REMOTE_AGENT_API_KEY=${secretName}:latest" `
     --port 8080 `
     --format="value(status.url)" 2>&1

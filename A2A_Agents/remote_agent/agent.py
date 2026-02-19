@@ -52,7 +52,9 @@ logger = logging.getLogger("a2a_remote_agent")
 # ---------------------------------------------------------------------------
 
 # Optional: set to None to disable API-key auth entirely
-REQUIRED_API_KEY = os.getenv("REMOTE_AGENT_API_KEY", "kpmg-dev-key-2026")
+REQUIRED_API_KEY  = os.getenv("REMOTE_AGENT_API_KEY", "kpmg-dev-key-2026")
+# OAuth2 Client ID — must match what Gemini Enterprise sends as client_id
+OAUTH_CLIENT_ID   = os.getenv("OAUTH_CLIENT_ID",      "kpmg-gemini-client")
 
 # Topics this agent is allowed to handle (keyword allowlist)
 ALLOWED_KEYWORDS = [
@@ -82,9 +84,13 @@ BLOCKED_PHRASES = [
 # ---------------------------------------------------------------------------
 
 class APIKeyAuthMiddleware:
-    """Rejects any request that doesn't carry the correct X-Agent-Key header."""
+    """Accepts requests carrying X-Agent-Key header OR Authorization: Bearer <token>."""
 
-    EXEMPT_PATHS = {"/.well-known/agent.json", "/.well-known/agent-card.json"}
+    EXEMPT_PATHS = {
+        "/.well-known/agent.json",
+        "/.well-known/agent-card.json",
+        "/oauth2/token",   # handled by OAuthTokenMiddleware before this layer
+    }
 
     def __init__(self, app):
         self.app = app
@@ -97,22 +103,30 @@ class APIKeyAuthMiddleware:
 
         path = scope.get("path", "")
 
-        # Skip auth for agent-card discovery endpoints
+        # Skip auth for discovery and OAuth token endpoints
         if path in self.EXEMPT_PATHS or REQUIRED_API_KEY is None:
             await self.app(scope, receive, send)
             return
 
         headers = {k.decode(): v.decode() for k, v in scope.get("headers", [])}
+
+        # Accept X-Agent-Key header (direct A2A calls from Root Agent)
         provided_key = headers.get("x-agent-key", "")
 
-        if provided_key != REQUIRED_API_KEY:
+        # Accept Authorization: Bearer <token> (OAuth2 flow from Gemini Enterprise)
+        bearer_token = ""
+        auth_header = headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            bearer_token = auth_header[7:].strip()
+
+        if provided_key != REQUIRED_API_KEY and bearer_token != REQUIRED_API_KEY:
             self._logger.warning(
-                "🚫 [AUTH] Rejected request to %s — invalid/missing X-Agent-Key (got: %r)",
-                path, provided_key,
+                "🚫 [AUTH] Rejected %s — invalid/missing API key or Bearer token",
+                path,
             )
             body = json.dumps({
                 "error": "Unauthorized",
-                "message": "Missing or invalid X-Agent-Key header.",
+                "message": "Provide X-Agent-Key header or a valid Bearer token.",
             }).encode()
             await send({
                 "type": "http.response.start",
@@ -122,8 +136,101 @@ class APIKeyAuthMiddleware:
             await send({"type": "http.response.body", "body": body})
             return
 
-        self._logger.info("✅ [AUTH] Request to %s authorised", path)
+        auth_method = "Bearer token" if bearer_token == REQUIRED_API_KEY else "X-Agent-Key"
+        self._logger.info("✅ [AUTH] %s authorised via %s", path, auth_method)
         await self.app(scope, receive, send)
+
+
+# ---------------------------------------------------------------------------
+# ASGI Middleware 3: OAuth2 Token Endpoint (Client Credentials flow)
+# Handles POST /oauth2/token — must be the OUTERMOST layer so it bypasses auth.
+# Gemini Enterprise calls this to get a Bearer token before any A2A requests.
+# ---------------------------------------------------------------------------
+
+class OAuthTokenMiddleware:
+    """Exposes POST /oauth2/token for OAuth2 client credentials flow.
+
+    Gemini Enterprise configuration:
+      Token URL  : https://<your-cloud-run-url>/oauth2/token
+      Client ID  : <any value, e.g. 'gemini-enterprise'>
+      Client Secret: <value of REMOTE_AGENT_API_KEY>
+    """
+
+    TOKEN_PATH = "/oauth2/token"
+    AUTH_PATH  = "/oauth2/auth"
+
+    def __init__(self, app):
+        self.app = app
+        self._logger = logging.getLogger("a2a_remote_agent.oauth")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path  = scope.get("path", "")
+        method = scope.get("method", "")
+
+        # Token endpoint (POST)
+        if path == self.TOKEN_PATH and method == "POST":
+            await self._handle_token(scope, receive, send)
+            return
+
+        # Authorization URI (GET) - Dummy endpoint for UI configuration compatibility
+        if path == self.AUTH_PATH and method == "GET":
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [[b"content-type", b"text/plain"]]})
+            await send({"type": "http.response.body", "body": b"campability_endpoint_ok"})
+            return
+
+        # All other paths — pass through to auth + A2A layers
+        await self.app(scope, receive, send)
+
+    async def _handle_token(self, scope, receive, send):
+        """Validate client_secret and return an OAuth2 access token."""
+        message = await receive()
+        body = message.get("body", b"").decode(errors="replace")
+        params = urllib.parse.parse_qs(body)
+
+        grant_type    = params.get("grant_type",    [""])[0]
+        client_id     = params.get("client_id",     [""])[0]   # logged only, not validated
+        client_secret = params.get("client_secret", [""])[0]
+
+        self._logger.info(
+            "[OAUTH] Token request — grant_type=%r client_id=%r",
+            grant_type, client_id,
+        )
+
+        # Validate: must be client_credentials + correct client_id AND secret
+        if (
+            grant_type != "client_credentials"
+            or client_id     != OAUTH_CLIENT_ID
+            or client_secret != REQUIRED_API_KEY
+        ):
+            self._logger.warning(
+                "[OAUTH] Rejected — invalid grant, client_id=%r or secret",
+                client_id,
+            )
+            error_body = json.dumps({
+                "error": "invalid_client",
+                "error_description": "Invalid client_secret or unsupported grant_type.",
+            }).encode()
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [[b"content-type", b"application/json"]]})
+            await send({"type": "http.response.body", "body": error_body})
+            return
+
+        # Return the API key itself as the Bearer token (stateless, no JWT needed)
+        token_body = json.dumps({
+            "access_token": REQUIRED_API_KEY,
+            "token_type":   "Bearer",
+            "expires_in":   3600,
+            "scope":        "",
+        }).encode()
+        self._logger.info("[OAUTH] Issued Bearer token for client_id=%r", client_id)
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [[b"content-type", b"application/json"]]})
+        await send({"type": "http.response.body", "body": token_body})
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +523,8 @@ else:
     _a2a_app = to_a2a(root_agent, port=port)
 
 _logged    = A2ALoggingMiddleware(_a2a_app)
-a2a_app    = APIKeyAuthMiddleware(_logged)
+_auth      = APIKeyAuthMiddleware(_logged)   # X-Agent-Key OR Bearer token
+a2a_app    = OAuthTokenMiddleware(_auth)     # /oauth2/token endpoint (outermost)
 
 logger.info(
     "✅ A2A Remote Agent ready\n"
