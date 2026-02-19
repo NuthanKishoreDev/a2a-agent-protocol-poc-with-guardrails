@@ -1,0 +1,3 @@
+google-adk[a2a]
+uvicorn[standard]
+python-dotenv
