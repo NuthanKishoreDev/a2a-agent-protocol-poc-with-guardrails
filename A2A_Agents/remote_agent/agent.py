@@ -397,7 +397,24 @@ root_agent = Agent(
 # Build ASGI app: Agent → Logging middleware → Auth middleware
 # ---------------------------------------------------------------------------
 
-_a2a_app   = to_a2a(root_agent, port=8081)
+# Cloud Run expects the app to listen on the port defined by the PORT env var
+port = int(os.getenv("PORT", 8081))
+
+# Configure A2A metadata (Agent Card URL)
+service_url = os.getenv("SERVICE_URL")
+if service_url:
+    # If SERVICE_URL is set (production), use it to configure the Agent Card
+    parsed = urllib.parse.urlparse(service_url)
+    _a2a_app = to_a2a(
+        root_agent,
+        host=parsed.hostname,
+        port=parsed.port or (443 if parsed.scheme == "https" else 80),
+        protocol=parsed.scheme,
+    )
+else:
+    # Local development
+    _a2a_app = to_a2a(root_agent, port=port)
+
 _logged    = A2ALoggingMiddleware(_a2a_app)
 a2a_app    = APIKeyAuthMiddleware(_logged)
 
